@@ -1,0 +1,32 @@
+# ── Rust ──────────────────────────────────────────────────────────────
+/target
+**/*.rs.bk
+*.pdb
+
+# Cargo.lock IS committed (this is a binary crate) — do not ignore it.
+
+# ── Nix ───────────────────────────────────────────────────────────────
+/result
+/result-*
+.direnv/
+
+# ── direnv ────────────────────────────────────────────────────────────
+.envrc.local
+
+# ── OpenCode / Oh My OpenAgent ────────────────────────────────────────
+# Local agent working state, sessions, and per-user overrides.
+.opencode/
+.sisyphus/
+.omo/
+opencode.json
+opencode.jsonc.local
+AGENTS.local.md
+.opencode-auth.json
+
+# ── Editor / OS ───────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

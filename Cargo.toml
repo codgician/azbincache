@@ -1,0 +1,89 @@
+[package]
+name = "azbincache"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Publish a Nix binary cache to Azure Blob Storage with upstream-aware dedup and commit-windowed GC"
+license = "MIT"
+repository = "https://github.com/codgician/azbincache"
+readme = "README.md"
+default-run = "azbincache"
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_qualifications = "warn"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+# Domain: Nix store hashes/sizes are opaque literals; digit separators add noise.
+unreadable_literal = "allow"
+# We own every key we list(); case-sensitive suffix checks are intended.
+case_sensitive_file_extension_comparisons = "allow"
+# Most getters here are cheap and not worth #[must_use] churn.
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+
+[lib]
+name = "azbincache"
+path = "src/lib.rs"
+
+[[bin]]
+name = "azbincache"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+tokio = { version = "1", features = [
+  "rt-multi-thread",
+  "macros",
+  "process",
+  "io-util",
+  "fs",
+  "sync",
+] }
+futures = "0.3"
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ed25519-dalek = "2"
+sha2 = "0.10"
+data-encoding = "2"
+zstd = "0.13"
+xz2 = "0.1"
+# Pinned to 0.12: 0.13's `rustls` feature switched to rustls-platform-verifier
+# (system trust store) and dropped `rustls-tls-webpki-roots`, which breaks
+# hermetic Nix sandbox builds and minimal CI containers (no system CA store).
+# 0.12 bundles webpki roots. Revisit if 0.13 regains a bundled-roots feature.
+reqwest = { version = "0.12", default-features = false, features = [
+  "rustls-tls",
+  "stream",
+] }
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+azure_core = "1"
+azure_identity = "1"
+azure_storage_blob = "1"
+url = "2"
+bytes = "1"
+tempfile = "3"
+tokio-util = { version = "0.7", features = ["io"] }
+
+[dev-dependencies]
+# hmac 0.13 needs digest 0.11; pinned to 0.12 because ed25519-dalek 2.x locks
+# sha2 0.10 (digest 0.10), which Hmac<Sha256> must share. Bump when dalek moves.
+hmac = "0.12"
+base64 = "0.22"
+
+[profile.release]
+lto = "thin"
+strip = true
