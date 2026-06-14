@@ -28,7 +28,7 @@ jobs:
         run: nix build
 
       - name: Push to azbincache
-        uses: codgician/azbincache@v1
+        uses: codgician/azbincache@main
         with:
           to: ${{ secrets.AZBINCACHE_SAS_URL }}
           signing-key: ${{ secrets.AZBINCACHE_SIGNING_KEY }}
@@ -60,7 +60,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Push to azbincache (keyless)
-        uses: codgician/azbincache@v1
+        uses: codgician/azbincache@main
         with:
           to: https://myaccount.blob.core.windows.net/$web
           auth: oidc

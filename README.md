@@ -108,7 +108,7 @@ flow. Install Nix, build, then push the result:
 ```yaml
 - uses: cachix/install-nix-action@v31
 - run: nix build
-- uses: codgician/azbincache@v1
+- uses: codgician/azbincache@main
   with:
     to: ${{ secrets.AZBINCACHE_SAS_URL }}
     signing-key: ${{ secrets.AZBINCACHE_SIGNING_KEY }}
