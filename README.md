@@ -100,6 +100,39 @@ Store the secret in CI (e.g. a GitHub Actions secret consumed via
 `--signing-key-env`); publish the public key in `trusted-public-keys`. You can
 re-derive the public key from the secret at any time with `azbincache pubkey`.
 
+## Use as a GitHub Action
+
+A composite action wraps `azbincache push` for the common "build then push"
+flow. Install Nix, build, then push the result:
+
+```yaml
+- uses: cachix/install-nix-action@v31
+- run: nix build
+- uses: codgician/azbincache@v1
+  with:
+    to: ${{ secrets.AZBINCACHE_SAS_URL }}
+    signing-key: ${{ secrets.AZBINCACHE_SIGNING_KEY }}
+    paths: result
+    upstream: |
+      https://cache.nixos.org=cache.nixos.org-1
+```
+
+`to` and `signing-key` are passed to the CLI as environment variables, so
+secrets never appear in process arguments or logs. By default the action
+records a commit manifest (from `github.sha`) so `azbincache gc` can prune by
+commit later.
+
+Key inputs: `to` (required), `signing-key`, `paths` (default `result`),
+`auth` (`auto`/`sas`/`oidc`/`service-principal`), `azure-tenant-id` /
+`azure-client-id` / `azure-client-secret`, `upstream`, `commit` /
+`commit-time` / `host`, `compression` / `compression-level`, `skip-push`,
+`extra-args`, and `version` (the azbincache flake ref to run). For keyless
+OIDC and service-principal setups see
+[`docs/examples/build-and-cache.yml`](docs/examples/build-and-cache.yml).
+
+The action requires Nix on the runner (it shells out to
+`nix run github:codgician/azbincache`); add an installer step first.
+
 ## Development
 
 ```

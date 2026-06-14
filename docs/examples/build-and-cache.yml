@@ -1,0 +1,68 @@
+# Example: consume the azbincache push action in your own repository.
+# Copy this into your repo's .github/workflows/ and adjust to taste.
+#
+# Two variants are shown:
+#   * sas-build   — push with a SAS URL secret (simplest).
+#   * oidc-build  — keyless push via GitHub OIDC + Entra (no long-lived secret;
+#                   the federated identity needs the "Storage Blob Data
+#                   Contributor" role on the container).
+
+name: build-and-cache
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sas-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build
+        run: nix build
+
+      - name: Push to azbincache
+        uses: codgician/azbincache@v1
+        with:
+          to: ${{ secrets.AZBINCACHE_SAS_URL }}
+          signing-key: ${{ secrets.AZBINCACHE_SIGNING_KEY }}
+          paths: result
+          upstream: |
+            https://cache.nixos.org=cache.nixos.org-1
+            https://nix-community.cachix.org=nix-community.cachix.org-1
+
+  oidc-build:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build
+        run: nix build
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Push to azbincache (keyless)
+        uses: codgician/azbincache@v1
+        with:
+          to: https://myaccount.blob.core.windows.net/$web
+          auth: oidc
+          signing-key: ${{ secrets.AZBINCACHE_SIGNING_KEY }}
+          paths: result

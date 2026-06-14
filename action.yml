@@ -1,0 +1,157 @@
+name: "Push to azbincache"
+description: "Publish built Nix store paths to an azbincache binary cache on Azure Blob Storage (or any HTTP host)."
+author: "codgician"
+
+branding:
+  icon: "upload-cloud"
+  color: "blue"
+
+inputs:
+  to:
+    description: "Write URL of the cache (Azure container URL, optionally with a SAS '?...sig=', or an HTTP/WebDAV base URL)."
+    required: true
+  paths:
+    description: "Newline- or space-separated store paths / result symlinks to push (their closures are included). Defaults to ./result."
+    required: false
+    default: "result"
+
+  signing-key:
+    description: "Nix binary cache secret signing key ('name:base64'). Pass via secrets; consumed as an env var, never logged."
+    required: false
+  signing-key-file:
+    description: "Path to a file containing the secret signing key (alternative to signing-key)."
+    required: false
+
+  auth:
+    description: "Azure auth mode: auto | sas | oidc | service-principal."
+    required: false
+    default: "auto"
+  azure-tenant-id:
+    description: "Entra tenant ID (service-principal auth)."
+    required: false
+  azure-client-id:
+    description: "Entra client ID (service-principal auth)."
+    required: false
+  azure-client-secret:
+    description: "Entra client secret (service-principal auth). Consumed as an env var, never logged."
+    required: false
+
+  upstream:
+    description: "Newline-separated upstream caches to dedup against, each 'URL[=public-key-name]'."
+    required: false
+
+  commit:
+    description: "Commit id recorded in the push manifest. Defaults to the triggering commit SHA."
+    required: false
+    default: ${{ github.sha }}
+  commit-time:
+    description: "Unix timestamp for the commit manifest. Defaults to the time of the triggering commit."
+    required: false
+  host:
+    description: "Host label for the manifest (lets multiple runners share a commit). Defaults to the runner OS+arch."
+    required: false
+
+  compression:
+    description: "NAR compression: zstd | xz | none."
+    required: false
+    default: "zstd"
+  compression-level:
+    description: "Compression level (zstd 1-22, xz 0-9). Tool default if empty."
+    required: false
+
+  skip-push:
+    description: "If 'true', resolve everything but upload nothing (dry validation)."
+    required: false
+    default: "false"
+  extra-args:
+    description: "Additional raw flags appended to `azbincache push`."
+    required: false
+  version:
+    description: "Flake ref of azbincache to run (e.g. a tag or commit). Defaults to the released major."
+    required: false
+    default: "github:codgician/azbincache"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Push to azbincache
+      shell: bash
+      env:
+        AZBINCACHE_SAS_URL: ${{ inputs.to }}
+        AZBINCACHE_SIGNING_KEY: ${{ inputs.signing-key }}
+        AZBINCACHE_AUTH: ${{ inputs.auth }}
+        AZURE_TENANT_ID: ${{ inputs.azure-tenant-id }}
+        AZURE_CLIENT_ID: ${{ inputs.azure-client-id }}
+        AZURE_CLIENT_SECRET: ${{ inputs.azure-client-secret }}
+        INPUT_PATHS: ${{ inputs.paths }}
+        INPUT_SIGNING_KEY_FILE: ${{ inputs.signing-key-file }}
+        INPUT_UPSTREAM: ${{ inputs.upstream }}
+        INPUT_COMMIT: ${{ inputs.commit }}
+        INPUT_COMMIT_TIME: ${{ inputs.commit-time }}
+        INPUT_HOST: ${{ inputs.host }}
+        INPUT_COMPRESSION: ${{ inputs.compression }}
+        INPUT_COMPRESSION_LEVEL: ${{ inputs.compression-level }}
+        INPUT_SKIP_PUSH: ${{ inputs.skip-push }}
+        INPUT_EXTRA_ARGS: ${{ inputs.extra-args }}
+        INPUT_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        if [ "${INPUT_SKIP_PUSH:-false}" = "true" ]; then
+          echo "skip-push=true: nothing uploaded."
+          exit 0
+        fi
+
+        if ! command -v nix >/dev/null 2>&1; then
+          echo "::error::nix is not installed. Add an installer step (e.g. cachix/install-nix-action) before this action." >&2
+          exit 1
+        fi
+
+        # Resolve store paths from the provided result symlinks / paths.
+        paths=()
+        for p in $INPUT_PATHS; do
+          if [ -e "$p" ]; then
+            paths+=("$(readlink -f "$p")")
+          else
+            paths+=("$p")
+          fi
+        done
+        if [ "${#paths[@]}" -eq 0 ]; then
+          echo "::error::no paths to push (input 'paths' resolved to nothing)." >&2
+          exit 1
+        fi
+
+        args=(push --to "$AZBINCACHE_SAS_URL")
+
+        # Signing key: env var is preferred; fall back to file path.
+        if [ -n "${AZBINCACHE_SIGNING_KEY:-}" ]; then
+          args+=(--signing-key-env "$AZBINCACHE_SIGNING_KEY")
+        elif [ -n "${INPUT_SIGNING_KEY_FILE:-}" ]; then
+          args+=(--signing-key-file "$INPUT_SIGNING_KEY_FILE")
+        fi
+
+        # Upstreams: one --upstream per non-empty line.
+        if [ -n "${INPUT_UPSTREAM:-}" ]; then
+          while IFS= read -r u; do
+            [ -n "$u" ] && args+=(--upstream "$u")
+          done <<< "$INPUT_UPSTREAM"
+        fi
+
+        # Commit manifest. commit-time defaults to the commit's author time.
+        if [ -n "${INPUT_COMMIT:-}" ]; then
+          ct="${INPUT_COMMIT_TIME:-}"
+          if [ -z "$ct" ]; then
+            ct="$(git show -s --format=%ct "$INPUT_COMMIT" 2>/dev/null || date +%s)"
+          fi
+          host="${INPUT_HOST:-${RUNNER_OS:-unknown}-${RUNNER_ARCH:-unknown}}"
+          args+=(--commit "$INPUT_COMMIT" --commit-time "$ct" --host "$host")
+        fi
+
+        [ -n "${INPUT_COMPRESSION:-}" ] && args+=(--compression "$INPUT_COMPRESSION")
+        [ -n "${INPUT_COMPRESSION_LEVEL:-}" ] && args+=(--compression-level "$INPUT_COMPRESSION_LEVEL")
+        # shellcheck disable=SC2206
+        [ -n "${INPUT_EXTRA_ARGS:-}" ] && args+=($INPUT_EXTRA_ARGS)
+
+        echo "::group::azbincache push (${#paths[@]} path(s))"
+        nix run "$INPUT_VERSION" -- "${args[@]}" "${paths[@]}"
+        echo "::endgroup::"
