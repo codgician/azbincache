@@ -41,14 +41,7 @@ pub struct DoctorArgs {
 
 #[derive(Args, Debug)]
 pub struct PubkeyArgs {
-    #[arg(
-        long,
-        env = "AZBINCACHE_SIGNING_KEY",
-        conflicts_with = "signing_key_file"
-    )]
-    pub signing_key_env: Option<String>,
-
-    #[arg(long, conflicts_with = "signing_key_env")]
+    #[arg(long)]
     pub signing_key_file: Option<std::path::PathBuf>,
 }
 
@@ -60,14 +53,7 @@ pub struct PushArgs {
     #[command(flatten)]
     pub auth: AuthArgs,
 
-    #[arg(
-        long,
-        env = "AZBINCACHE_SIGNING_KEY",
-        conflicts_with = "signing_key_file"
-    )]
-    pub signing_key_env: Option<String>,
-
-    #[arg(long, conflicts_with = "signing_key_env")]
+    #[arg(long)]
     pub signing_key_file: Option<std::path::PathBuf>,
 
     #[arg(long, value_delimiter = ',')]
@@ -205,15 +191,23 @@ impl From<Algo> for crate::compress::Algo {
     }
 }
 
+/// Load the signing key. The secret material is read from the
+/// `AZBINCACHE_SIGNING_KEY` environment variable so it is never present on the
+/// command line (no argv exposure); a `--signing-key-file` path is the explicit
+/// alternative for non-CI use.
+const SIGNING_KEY_ENV: &str = "AZBINCACHE_SIGNING_KEY";
+
 fn load_signing_key(
-    env_val: Option<&String>,
     file: Option<&std::path::PathBuf>,
 ) -> anyhow::Result<crate::sign::NixSigningKey> {
-    let raw = match (env_val, file) {
-        (Some(v), _) => v.clone(),
+    let raw = match (std::env::var(SIGNING_KEY_ENV).ok(), file) {
+        (Some(v), _) => v,
         (None, Some(path)) => std::fs::read_to_string(path)?,
         (None, None) => {
-            anyhow::bail!("a signing key is required (--signing-key-env or --signing-key-file)")
+            anyhow::bail!(
+                "a signing key is required: set the {SIGNING_KEY_ENV} env var \
+                 or pass --signing-key-file"
+            )
         }
     };
     Ok(crate::sign::NixSigningKey::parse(raw.trim())?)
@@ -234,10 +228,7 @@ pub mod push {
             args.compression_level,
             args.allow_high_memory,
         )?;
-        let key = load_signing_key(
-            args.signing_key_env.as_ref(),
-            args.signing_key_file.as_ref(),
-        )?;
+        let key = load_signing_key(args.signing_key_file.as_ref())?;
         let backend = storage::from_url_with_auth(&args.to, args.auth.resolve()?)?;
         let opts = PushOptions {
             compression,
@@ -385,11 +376,8 @@ pub mod pubkey {
     use anyhow::Result;
 
     pub fn run(args: PubkeyArgs) -> Result<()> {
-        let PubkeyArgs {
-            signing_key_env,
-            signing_key_file,
-        } = args;
-        let key = load_signing_key(signing_key_env.as_ref(), signing_key_file.as_ref())?;
+        let PubkeyArgs { signing_key_file } = args;
+        let key = load_signing_key(signing_key_file.as_ref())?;
         tracing::debug!("derived public key for {}", key.name());
         println!("{}", key.public_key_field());
         Ok(())
@@ -443,6 +431,38 @@ mod tests {
     #[test]
     fn auto_resolves_to_none() {
         assert!(auth_args(AuthMode::Auto, None).resolve().unwrap().is_none());
+    }
+
+    #[test]
+    fn signing_key_is_not_acceptable_as_a_cli_flag() {
+        use clap::Parser as _;
+        for flag in ["--signing-key-env", "--signing-key"] {
+            let parsed = Cli::try_parse_from([
+                "azbincache",
+                "push",
+                "--to",
+                "http://h/c",
+                flag,
+                "secret-key-1:AAAA",
+                "./result",
+            ]);
+            assert!(
+                parsed.is_err(),
+                "{flag} must be rejected: the key must never reach argv"
+            );
+        }
+    }
+
+    #[test]
+    fn push_parses_without_a_key_flag() {
+        use clap::Parser as _;
+        let cli = Cli::try_parse_from(["azbincache", "push", "--to", "http://h/c", "./result"])
+            .expect("push parses with no key on the command line");
+        let Command::Push(args) = cli.command else {
+            panic!("expected push");
+        };
+        assert_eq!(args.paths, vec!["./result".to_string()]);
+        assert!(args.signing_key_file.is_none());
     }
 
     #[test]

@@ -48,7 +48,6 @@ In `build-linux` and `build-darwin`, **after** the `Build` step, add:
         run: |
           nix run github:codgician/azbincache -- push \
             --to "$AZBINCACHE_SAS_URL" \
-            --signing-key-env "$AZBINCACHE_SIGNING_KEY" \
             --upstream https://cache.nixos.org=cache.nixos.org-1 \
             --upstream https://nix-community.cachix.org=nix-community.cachix.org-1 \
             --commit "$GITHUB_SHA" \
@@ -92,7 +91,6 @@ then:
           nix run github:codgician/azbincache -- push \
             --to "https://<ACCOUNT>.blob.core.windows.net/\$web" \
             --auth oidc \
-            --signing-key-env "$AZBINCACHE_SIGNING_KEY" \
             --upstream https://cache.nixos.org=cache.nixos.org-1 \
             --commit "$GITHUB_SHA" --commit-time "$(git show -s --format=%ct HEAD)" \
             --host "${{ matrix.host.name }}" \

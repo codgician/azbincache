@@ -16,11 +16,8 @@ inputs:
     default: "result"
 
   signing-key:
-    description: "Nix binary cache secret signing key ('name:base64'). Pass via secrets; consumed as an env var, never logged."
-    required: false
-  signing-key-file:
-    description: "Path to a file containing the secret signing key (alternative to signing-key)."
-    required: false
+    description: "Nix binary cache secret signing key ('name:base64'). Pass from a GitHub secret; delivered to the CLI as an env var, never on the command line."
+    required: true
 
   auth:
     description: "Azure auth mode: auto | sas | oidc | service-principal."
@@ -84,7 +81,6 @@ runs:
         AZURE_CLIENT_ID: ${{ inputs.azure-client-id }}
         AZURE_CLIENT_SECRET: ${{ inputs.azure-client-secret }}
         INPUT_PATHS: ${{ inputs.paths }}
-        INPUT_SIGNING_KEY_FILE: ${{ inputs.signing-key-file }}
         INPUT_UPSTREAM: ${{ inputs.upstream }}
         INPUT_COMMIT: ${{ inputs.commit }}
         INPUT_COMMIT_TIME: ${{ inputs.commit-time }}
@@ -96,6 +92,17 @@ runs:
         INPUT_VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
+
+        # Defense in depth: register secret-bearing values for log masking
+        # before doing anything else, so an accidental echo can never leak them.
+        [ -n "${AZBINCACHE_SIGNING_KEY:-}" ] && echo "::add-mask::${AZBINCACHE_SIGNING_KEY}"
+        [ -n "${AZURE_CLIENT_SECRET:-}" ] && echo "::add-mask::${AZURE_CLIENT_SECRET}"
+        # Mask only the SAS signature, not the whole URL (the endpoint is useful
+        # in logs; the 'sig=' value is the bearer credential).
+        if [ -n "${AZBINCACHE_SAS_URL:-}" ]; then
+          sig="$(printf '%s' "$AZBINCACHE_SAS_URL" | sed -n 's/.*[?&]sig=\([^&]*\).*/\1/p')"
+          [ -n "$sig" ] && echo "::add-mask::${sig}"
+        fi
 
         if [ "${INPUT_SKIP_PUSH:-false}" = "true" ]; then
           echo "skip-push=true: nothing uploaded."
@@ -123,11 +130,11 @@ runs:
 
         args=(push --to "$AZBINCACHE_SAS_URL")
 
-        # Signing key: env var is preferred; fall back to file path.
-        if [ -n "${AZBINCACHE_SIGNING_KEY:-}" ]; then
-          args+=(--signing-key-env "$AZBINCACHE_SIGNING_KEY")
-        elif [ -n "${INPUT_SIGNING_KEY_FILE:-}" ]; then
-          args+=(--signing-key-file "$INPUT_SIGNING_KEY_FILE")
+        # The signing key is read from the AZBINCACHE_SIGNING_KEY env var by the
+        # CLI itself; it is never placed on the command line (no argv exposure).
+        if [ -z "${AZBINCACHE_SIGNING_KEY:-}" ]; then
+          echo "::error::signing-key is required (set the 'signing-key' input from a secret)." >&2
+          exit 1
         fi
 
         # Upstreams: one --upstream per non-empty line.

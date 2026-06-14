@@ -45,7 +45,7 @@ extra-trusted-public-keys = your-cache-1:<pubkey>
 ```
 azbincache push \
   --to <write-URL or SAS>            # AZBINCACHE_SAS_URL
-  --signing-key-file <path>          # or --signing-key-env AZBINCACHE_SIGNING_KEY
+  --signing-key-file <path>          # or set AZBINCACHE_SIGNING_KEY in the env
   --upstream https://cache.nixos.org=cache.nixos.org-1 \   # URL[=public-key-name]
   --commit "$GITHUB_SHA" --commit-time "$(git show -s --format=%ct)" \
   --host "$HOSTNAME" \
@@ -96,9 +96,12 @@ forces a self-contained cache.
 nix-store --generate-binary-cache-key your-cache-1 ./secret ./public
 ```
 
-Store the secret in CI (e.g. a GitHub Actions secret consumed via
-`--signing-key-env`); publish the public key in `trusted-public-keys`. You can
-re-derive the public key from the secret at any time with `azbincache pubkey`.
+Store the secret in CI as a GitHub Actions secret and expose it to the push
+step as the `AZBINCACHE_SIGNING_KEY` environment variable (the key is read from
+the environment, never passed on the command line, so it can't leak into
+process arguments or logs); publish the public key in `trusted-public-keys`.
+You can re-derive the public key from the secret at any time with
+`azbincache pubkey`.
 
 ## Use as a GitHub Action
 
@@ -118,9 +121,11 @@ flow. Install Nix, build, then push the result:
 ```
 
 `to` and `signing-key` are passed to the CLI as environment variables, so
-secrets never appear in process arguments or logs. By default the action
-records a commit manifest (from `github.sha`) so `azbincache gc` can prune by
-commit later.
+secrets never appear in process arguments. The action also registers the
+signing key, any Azure client secret, and the SAS signature for log masking
+(`::add-mask::`) as its first step, so they stay redacted even if something
+later echoes them. By default the action records a commit manifest (from
+`github.sha`) so `azbincache gc` can prune by commit later.
 
 Key inputs: `to` (required), `signing-key`, `paths` (default `result`),
 `auth` (`auto`/`sas`/`oidc`/`service-principal`), `azure-tenant-id` /
